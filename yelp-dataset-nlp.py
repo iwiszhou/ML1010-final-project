@@ -37,7 +37,7 @@ table_names = {
     "clean_reviews": "clean_reviews"
 }
 
-
+# Helper functions
 def get_absolute_path(file_name):
     return Path(__file__).parent / file_name
 
@@ -118,7 +118,7 @@ if not os.path.isfile(review_file_path):
     df["class"] = df.apply(get_class_label_value, axis=1)
 
     # Create new data frame
-    filter_df = df[['class','text']]
+    filter_df = df[['class', 'text']]
     print(filter_df.head(1).values)
     print(filter_df.shape[0])
     print(filter_df.columns)
@@ -146,7 +146,7 @@ if not os.path.isfile(balance_review_file_path):
     print(filter_df.loc[filter_df["class"] == 0].count())
 
     # balance the data
-    balance_data_count = 100
+    balance_data_count = 10
     n_df = filter_df.loc[filter_df["class"] == 0][:balance_data_count]
     # number of negative rows
     print("Number of negative should be 100. Actual is ", len(n_df.loc[n_df["class"] == 0]))
@@ -156,7 +156,6 @@ if not os.path.isfile(balance_review_file_path):
     # number of positive rows
     print("Number of positive should be 100. Actual is ", len(p_df.loc[p_df["class"] == 1]))
     print("Number of negative should be 0. Actual is ", len(p_df.loc[p_df["class"] == 0]))
-
 
     # merge positive and negative together to become a balance data
     filter_df = n_df.append(p_df)
@@ -245,6 +244,11 @@ else:
 print(filter_df["norm_text"].describe())
 print(filter_df.head(1))
 
+# Put all word in one set
+words_set = set()
+for doc in filter_df["norm_text"]:
+    for token in doc.split():
+        words_set.add(token)
 
 '''
 STEP 3 - Feature extraction from text
@@ -258,14 +262,18 @@ Using TF-IDF to convert text to vector
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 vectorizer = TfidfVectorizer(min_df=2)
-tfidf = vectorizer.fit_transform(filter_df["norm_text"])
+tfidf = vectorizer.fit_transform(filter_df["norm_text"].values)
 
 # convert to array
 tfidf = tfidf.toarray()
-print(tfidf.shape) # 200 is our rows, 1186 is how many words
+print(tfidf.shape)  # 200 is our rows, 1186 is how many words
 
 words = vectorizer.get_feature_names()
-print(words[-10:]) # last 10 words
+
+# plt.figure(figsize=[20,4])
+# _ = plt.show(tfidf)
+
+pd.DataFrame(tfidf, columns=words)
 
 '''
 STEP 4 - Build Models
@@ -274,12 +282,23 @@ STEP 4 - Build Models
 # Prepare the train and test dataset
 from sklearn.model_selection import train_test_split
 
-X = filter_df['norm_text'] # the features we want to analyze
-y = filter_df['class'] # the labels, or answers, we want to test against
+X = tfidf  # the features we want to analyze
+y = filter_df['class'].values  # the labels, or answers, we want to test against
 
-# split into train and test dataset TODO - balance the dataset
+# split into train and test dataset
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
 
-### Logistic regression of 1-gram with TF-IDF
+# Logistic regression
+from sklearn.linear_model import LogisticRegression
 
-### Logistic regression of 2-gram with TF-IDF
+model = LogisticRegression().fit(X_train, y_train)
+
+predict_ret = model.predict_proba(X_test)
+
+# convert to Positive and Negative
+y_predict = np.array([int(p[1] > 0.5) for p in predict_ret])
+
+# accuracy
+print(y_predict)
+print(y_test)
+print(np.sum(y_test == y_predict) / len(y_test))
