@@ -38,6 +38,10 @@ table_names = {
 }
 
 
+def get_absolute_path(file_name):
+    return Path(__file__).parent / file_name
+
+
 # Save data to database
 def save_to_db(dataFrame, tableName):
     con = sqlite3.connect(db_name)
@@ -57,7 +61,7 @@ def get_table_by_name(tableName):
 # NOTE - the data-set is too big. I have already to several time, my computer crash. So that, I would start with first
 # 10000 rows. I would increase the data-set size when training the model.
 def load_json():
-    filename = Path(__file__).parent / './yelp_dataset/review.json'
+    filename = get_absolute_path('./yelp_dataset/review.json')
     row_count = 0
     row_limit = 10000
     df = []
@@ -82,49 +86,91 @@ else:
     df = load_json()
     save_to_db(df, table_names["reviews"])
 
-# Check number of rows
-print(df.shape[0])
-
-# List all columns
-print(df.columns)
-
-# Check data-set
+# Top 5 records
 print(df.head().values)
+
+# Shape of dataframe
+print(df.shape)
+
+# View data information
+print(df.info())
 
 # Check na values
 print(df.isnull().values.sum())
 
-
-# There are not NA value in this data-set.
+"""
+There are not NA value in this data-set. Next, let's create a new column to store our Class/Label value,
+which depennds on our 'stars' column, if 'stars' is great than 3, Class/Label is 1 - 'Positive'. Otherwise,
+it is 0 - 'Negative'
+"""
 
 
 # Create a class(label) column
 def get_class_label_value(row):
     if row["stars"] >= 3:
-        return "Positive"
-    return "Negative"
+        return 1
+    return 0
 
 
-if not os.path.isfile("review.csv"):
+review_file_path = get_absolute_path("review.csv")
+
+if not os.path.isfile(review_file_path):
     df["class"] = df.apply(get_class_label_value, axis=1)
 
     # Create new data frame
-    filter_df = df[['text', 'class']]
+    filter_df = df[['class','text']]
     print(filter_df.head(1).values)
     print(filter_df.shape[0])
     print(filter_df.columns)
 
     # Export to csv
-    filter_df.to_csv("review.csv", encoding='utf-8', index=False)
+    filter_df.to_csv(review_file_path, encoding='utf-8', index=False)
 else:
     # Import csv
-    filter_df = pd.read_csv("review.csv", encoding='utf-8')
+    filter_df = pd.read_csv(review_file_path, encoding='utf-8')
 
 '''
 STEP 2 - Clean data / Text pre-processing
 '''
 
-# Text Normalization
+"""
+First of all, let's balance the data
+"""
+balance_review_file_path = get_absolute_path("balance_review.csv")
+
+if not os.path.isfile(balance_review_file_path):
+    # num of Positive record
+    print(filter_df.loc[filter_df["class"] == 1].count())
+
+    # num of Negative record
+    print(filter_df.loc[filter_df["class"] == 0].count())
+
+    # balance the data
+    balance_data_count = 100
+    n_df = filter_df.loc[filter_df["class"] == 0][:balance_data_count]
+    # number of negative rows
+    print("Number of negative should be 100. Actual is ", len(n_df.loc[n_df["class"] == 0]))
+    print("Number of positive should be 0. Actual is ", len(n_df.loc[n_df["class"] == 1]))
+
+    p_df = filter_df.loc[filter_df["class"] == 1][:balance_data_count]
+    # number of positive rows
+    print("Number of positive should be 100. Actual is ", len(p_df.loc[p_df["class"] == 1]))
+    print("Number of negative should be 0. Actual is ", len(p_df.loc[p_df["class"] == 0]))
+
+
+    # merge positive and negative together to become a balance data
+    filter_df = n_df.append(p_df)
+
+    filter_df.to_csv(balance_review_file_path, encoding='utf-8', index=False)
+else:
+    # Import csv
+    filter_df = pd.read_csv(balance_review_file_path, encoding='utf-8')
+
+"""
+Secondly, we would use NLTK method to normalize our corpus.
+"""
+
+# Text Normalization - using NLTK
 wpt = nltk.WordPunctTokenizer()
 stop_words = nltk.corpus.stopwords.words('english')
 
@@ -145,78 +191,94 @@ def normalize_document(doc):
 
 normalize_corpus = np.vectorize(normalize_document)
 
-filter_df["norm_text"] = normalize_corpus(filter_df["text"])
+# filter_df["norm_text"] = normalize_corpus(filter_df["text"])
+#
+# # Check the result
+# print(filter_df["norm_text"].describe())
+# print(filter_df.head(1))
 
-# Check the result
-print(filter_df["norm_text"].describe())
-print(filter_df.head(1))
+"""
+As the result, the norm text is still have some words not fully converted to what we want.
+Such as, 'checked', 'costs', we expected those should stem correctly.
+Next, let's try library Spacy, which provide all lots of helper method for us to normalize our corpus.
+"""
 
-#     # Export to csv
-#     filterDf.to_csv("norm_review.csv", encoding='utf-8', index=False)
-# else:
-#     # Import from csv
-#     filterDf = pd.read_csv("norm_review.csv", encoding='utf-8')
-
-
-### As the result, the norm text is still have some words not fully converted to what we want.
-### Such as, 'checked', 'costs', we expected those should stem correctly.
-### Next, let's try library spacy.
-
-# Text Normalization - part 2
+# Text Normalization - using Spacy
 nlp = spacy.load("en_core_web_sm")
+white_list_pos = ["VERB", "PART", "NOUN", "ADJ", "ADV"]
 
 
-def spacy_norm_doc(doc):
-    doc = nlp(doc)
-    # remove SYM, PUNCT, PRON and
-    doc = filter(lambda d: d.pos_ != "SYM" and d.pos_ != "PUNCT" and d.pos_ != "PRON", doc)
-    # extra lemma_ only
-    lemma_text = [token.lemma_ for token in doc]
-    # filter stopwords out of document
-    filter_text = [token for token in lemma_text if token not in stop_words]
-    # remove duplicate token
-    unique_text = list(set(filter_text))
-    return " ".join(unique_text)
+def spacy_norm_text(text):
+    # tokenizing
+    doc = nlp(str(text))
+
+    ret_set = set()
+
+    # handle stop words, VERB, PART, ADJ, ADV and NOUN
+    for token in doc:
+        if not token.is_stop and token.text:  # remove stop words & empty string
+            if token.pos_ in white_list_pos:  # if token is in white list, taking lemma_ instead
+                ret_set.add(token.lemma_.lower().strip())
+
+    # handle PROPN
+    for token in doc.ents:
+        ret_set.add(token.text)
+
+    # convert to list
+    unique_list = list(ret_set)
+
+    return " ".join(unique_list)
 
 
-filter_df["norm_text"] = spacy_norm_doc(filter_df["text"])
+norm_review_file_path = get_absolute_path("norm_review.csv")
+
+if not os.path.isfile(norm_review_file_path):
+    filter_df["norm_text"] = filter_df.apply(lambda row: spacy_norm_text(row["text"]), 1);
+
+    # Export norm text to file
+    filter_df.to_csv(norm_review_file_path, encoding='utf-8', index=False)
+else:
+    # Import norm text data frame
+    filter_df = pd.read_csv(norm_review_file_path, encoding='utf-8')
 
 # Check the result
 print(filter_df["norm_text"].describe())
 print(filter_df.head(1))
 
 
-# ## Tokenization
-# tokenizer = nltk.tokenize.TreebankWordTokenizer()
-# tokens = tokenizer.tokenize(text)
-#
-# ## Token Normalization
+'''
+STEP 3 - Feature extraction from text
+'''
 
-# ### Stemming (only apply for Verb)
-# stemmer = nltk.stem.PorterStemmer()
-# " ".join(stemmer.stem(token) for token in tokens)
-#
-# ### Lemmaztization (not able to hanld Verb)
-# stemmer2 = nltk.stem.WordNetLemmatizer()
-# " ".join(stemmer2.lemmatize(token) for token in tokens)
-
-### Normazlizing capital letters ( lower case only first word in the sentence )
-
-## Feature extraction from text
+"""
+Using TF-IDF to convert text to vector
+"""
 
 ### TF-IDF
 from sklearn.feature_extraction.text import TfidfVectorizer
-# texts = ["",""]
-# tfidf = TfidfVectorizer(min_df=2,max_df=0.5, ngram_range=(1,2))
-# features = tfidf.fit_transform(texts)
-# pd.DataFrame(features.todense(), columns=tfidf.get_feature_names())
-tv = TfidfVectorizer(min_df=0., max_df=1., use_idf=True)
-tv_matrix = tv.fit_transform(filter_df["norm_text"])
-tv_matrix = tv_matrix.toarray()
-vocab = tv.get_feature_names()
-pd.DataFrame(np.round(tv_matrix, 2), columns=vocab)
 
-## Model
+vectorizer = TfidfVectorizer(min_df=2)
+tfidf = vectorizer.fit_transform(filter_df["norm_text"])
+
+# convert to array
+tfidf = tfidf.toarray()
+print(tfidf.shape) # 200 is our rows, 1186 is how many words
+
+words = vectorizer.get_feature_names()
+print(words[-10:]) # last 10 words
+
+'''
+STEP 4 - Build Models
+'''
+
+# Prepare the train and test dataset
+from sklearn.model_selection import train_test_split
+
+X = filter_df['norm_text'] # the features we want to analyze
+y = filter_df['class'] # the labels, or answers, we want to test against
+
+# split into train and test dataset TODO - balance the dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
 
 ### Logistic regression of 1-gram with TF-IDF
 
