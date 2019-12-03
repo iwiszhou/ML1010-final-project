@@ -146,15 +146,15 @@ if not os.path.isfile(balance_review_file_path):
     print(filter_df.loc[filter_df["class"] == 0].count())
 
     # balance the data
-    balance_data_count = 10
+    balance_data_count = 2300
     n_df = filter_df.loc[filter_df["class"] == 0][:balance_data_count]
     # number of negative rows
-    print("Number of negative should be 100. Actual is ", len(n_df.loc[n_df["class"] == 0]))
+    print("Number of negative should be "+balance_data_count+". Actual is ", len(n_df.loc[n_df["class"] == 0]))
     print("Number of positive should be 0. Actual is ", len(n_df.loc[n_df["class"] == 1]))
 
     p_df = filter_df.loc[filter_df["class"] == 1][:balance_data_count]
     # number of positive rows
-    print("Number of positive should be 100. Actual is ", len(p_df.loc[p_df["class"] == 1]))
+    print("Number of positive should be "+balance_data_count+". Actual is ", len(p_df.loc[p_df["class"] == 1]))
     print("Number of negative should be 0. Actual is ", len(p_df.loc[p_df["class"] == 0]))
 
     # merge positive and negative together to become a balance data
